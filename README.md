@@ -18,3 +18,13 @@ from the original artifact). Until storage is connected the site runs in preview
 ## Data
 
 Each collection is a Redis hash `hq:<collection>` holding one JSON document per id. Open tabs refresh every 20 seconds.
+
+## Project assistant (chat)
+
+The "Ask about a project" button opens a chat that answers questions from the live board data. It is read-only:
+it has no tools and can't change anything. It runs on Claude (`claude-opus-5-5`, low effort, short answers).
+
+- Set `ANTHROPIC_API_KEY` in the project's environment variables and redeploy. Without it the button stays hidden.
+- Limits, because the page is public: 20 questions per visitor per hour (`CHAT_LIMIT_PER_HOUR`) and 500 per day
+  across all visitors (`CHAT_LIMIT_PER_DAY`). Counters live in the same Redis database.
+- Optional: `CHAT_MODEL` to use a different Claude model.
