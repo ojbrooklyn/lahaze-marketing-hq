@@ -45,7 +45,7 @@ function boardText(data) {
       (data.projects || []).forEach((q) => { if ((q.related || []).includes(p.id)) linked.add(q.id); });
       linked.delete(p.id);
       const files = (Array.isArray(p.files) ? p.files : []).map((f) => pick(f, ["title", "kind", "date", "note", "url"]));
-      return { ...pick(p, ["name", "company", "area", "store", "status", "due", "next", "note", "link", "result", "budget", "spend", "shippedAt", "updatedAt"]),
+      return { ...pick(p, ["name", "category", "priority", "company", "area", "store", "status", "due", "next", "note", "link", "result", "budget", "spend", "shippedAt", "updatedAt"]),
         ...(files.length ? { docs: files } : {}), ...(linked.size ? { linkedProjects: [...linked].map((i) => byId[i]).filter(Boolean) } : {}) };
     })),
     sec("Approvals and decisions", (data.decisions || []).map((d) => ({ ...pick(d, ["title", "type", "ask", "from", "neededBy", "status", "outcome", "decidedOn"]), project: byId[d.project] }))),

@@ -3,11 +3,16 @@
 var STORES=["All stores","LaHaze (Cheboygan)","Lighthouse (Traverse City)","Parc (Alpena)","Newity"];
 var COMPANIES=["LaHaze","Newity"];
 var AREAS=["Campaigns","Brand","Web & digital","Retail","Content","Merch","Planning"];
+var CATS=["Direct marketing","Digital marketing","Operations","Membership","Subscriptions","Collaboration","Refresh website & GBP"];
+var CATHINT={"Direct marketing":"Billboards, radio, text marketing, paid ads","Digital marketing":"Content, social, SEO, GEO","Operations":"Dutchie, AlpineIQ, software"};
+var PRIOS=["High","Medium","Low"], PRANK={"High":0,"Medium":1,"Low":2}, PTONE={"High":"bad","Medium":"warn","Low":"mute"};
+function prioTag(p){return p.priority&&PRANK[p.priority]!=null?'<span class="pill prio" style="--c:var(--'+PTONE[p.priority]+')">'+esc(p.priority)+" priority</span>":""}
+function byPrio(a,b){var x=PRANK[a.priority],y=PRANK[b.priority];x=x==null?3:x;y=y==null?3:y;return x-y||(a.order||999)-(b.order||999)}
 var PSTATUS=["Not set","Planned","In progress","In review","Blocked","Ongoing","Shipped"];
 var PCOLOR={"Not set":"var(--mute)","Planned":"var(--mute)","In progress":"var(--info)","In review":"var(--warn)","Blocked":"var(--bad)","Ongoing":"var(--teal)","Shipped":"var(--ok)"};
 var TONE={"Shipped":"ok","Approved":"ok","Done":"ok","Decided":"ok","Closed":"mute","In progress":"info","Accepted":"info","Scheduled":"info","Waiting on them":"info","Ongoing":"teal","In review":"warn","Waiting":"warn","New":"warn","Waiting on us":"warn","Blocked":"bad","Declined":"bad","Planned":"mute"};
 var SCHEMA={
-  projects:{one:"project",fields:[["name","Project name","text",1],["company","Company","select",COMPANIES],["area","Area","select",AREAS],["store","Store","select",STORES],["status","Status","select",PSTATUS],["due","Due date","date"],["next","Next step","text"],["note","Notes","textarea"],["link","Link to the work (https://…)","url"],["result","Result leadership can read (a number or outcome)","text"],["budget","Budget ($)","number"],["spend","Spent so far ($)","number"],["shippedAt","Shipped on","date"]]},
+  projects:{one:"project",fields:[["name","Project name","text",1],["category","Category","select",CATS.concat(["Uncategorized"])],["priority","Priority","select",["Not set"].concat(PRIOS)],["company","Company","select",COMPANIES],["area","Type of work","select",AREAS],["store","Store","select",STORES],["status","Status","select",PSTATUS],["due","Due date","date"],["next","Next step","text"],["note","Notes","textarea"],["link","Link to the work (https://…)","url"],["result","Result leadership can read (a number or outcome)","text"],["budget","Budget ($)","number"],["spend","Spent so far ($)","number"],["shippedAt","Shipped on","date"]]},
   decisions:{one:"approval",fields:[["title","What needs a decision","text",1],["type","Type","select",["Approval","Decision","Budget"]],["project","Project","project"],["ask","The ask, in a sentence or two","textarea"],["from","Who decides","text"],["neededBy","Needed by","date"],["status","Status","select",["Waiting","Approved","Declined","Decided"]],["outcome","Outcome","textarea"],["decidedOn","Decided on","date"]]},
   requests:{one:"request",fields:[["title","What do you need?","text",1],["from","Your name","text"],["store","Store","select",STORES],["detail","Details","textarea"],["priority","Priority","select",["Normal","Urgent","Whenever"]],["neededBy","Needed by","date"],["status","Status","select",["New","Accepted","In progress","Done","Declined"]],["reply","Reply from marketing","textarea"]]},
   updates:{one:"update",fields:[["date","Date","date"],["project","Project","project"],["kind","Kind","select",["Progress","Shipped","Blocked","Heads up"]],["text","Update","textarea",1]]},
@@ -17,9 +22,9 @@ var SCHEMA={
 var COLS=Object.keys(SCHEMA);
 var TABS=[["board","Board"],["overview","Briefing"],["approvals","Approvals"],["requests","Requests"],["updates","Updates"],["vendors","Vendors"]];
 var S={}; COLS.forEach(function(c){S[c]=[]});
-var db=null, canWrite=false, loaded=false, problem="", filt={status:"All",store:"All",area:"All",mode:"board"};
+var db=null, canWrite=false, loaded=false, problem="", filt={status:"All",store:"All",area:"All",cat:"All",prio:"All",mode:"board"};
 var mode={storage:false,needsKey:false,key:""};
-try{var sv=JSON.parse(localStorage.getItem("hq-filt")||"null"); if(sv&&sv.store&&sv.area&&sv.mode) filt=sv;}catch(e){}
+try{var sv=JSON.parse(localStorage.getItem("hq-filt")||"null"); if(sv&&sv.store&&sv.mode) filt=Object.assign(filt,sv);}catch(e){}
 try{mode.key=localStorage.getItem("hq-key")||""}catch(e){}
 
 var $=function(s){return document.querySelector(s)};
@@ -46,7 +51,7 @@ function projRow(p){
   var u=safeUrl(p.link);
   var sub=[p.next?"Next: "+p.next:"",p.note||""].filter(Boolean).join(" · ");
   if(p.result) sub=(sub?sub+" · ":"")+"Result: "+p.result;
-  return '<div class="row"><div class="main"><div class="t">'+plink(p)+'</div>'+(sub?'<div class="s">'+esc(sub)+"</div>":"")+'</div><div class="side">'+(p.store&&p.store!=="All stores"?'<span class="tag">'+esc(p.store)+"</span>":"")+(p.status==="Shipped"?(p.shippedAt?'<span class="when">Shipped '+esc(fmt(p.shippedAt))+"</span>":""):when(p.due))+pill(p.status)+editBtn("projects",p.id)+"</div></div>";
+  return '<div class="row"><div class="main"><div class="t">'+plink(p)+'</div>'+(sub?'<div class="s">'+esc(sub)+"</div>":"")+'</div><div class="side">'+prioTag(p)+(p.store&&p.store!=="All stores"?'<span class="tag">'+esc(p.store)+"</span>":"")+(p.status==="Shipped"?(p.shippedAt?'<span class="when">Shipped '+esc(fmt(p.shippedAt))+"</span>":""):when(p.due))+pill(p.status)+editBtn("projects",p.id)+"</div></div>";
 }
 function decRow(d){
   var open=d.status==="Waiting"||!d.status;
@@ -90,7 +95,9 @@ function overviewBody(){
   html+='<div class="grid">';
   html+='<section class="panel"><p class="q">What needs leadership</p><h3>Waiting on a decision <a href="#approvals">All approvals</a></h3>'+list(wait.slice(0,5).map(decRow),"Nothing is waiting on leadership. Approvals, budget asks and blockers show up here the moment they are logged.")+"</section>";
   html+='<section class="panel"><p class="q">Dates and deadlines</p><h3>Coming up '+(canWrite&&db?'<a href="#" data-add="dates">Add a date</a>':"")+"</h3>"+list(ev.map(function(e){return '<div class="row"><div class="main"><div class="t">'+esc(e.t)+'</div><div class="s">'+esc(e.s)+'</div></div><div class="side">'+when(e.d)+(e.id?editBtn("dates",e.id,true):"")+"</div></div>"}),"No dates yet. Project due dates, request deadlines and key retail dates appear here in order.")+"</section>";
-  html+='<section class="panel"><p class="q">What has shipped</p><h3>Finished work <a href="#board">Project board</a></h3>'+list(shipped.slice(0,6).map(projRow),"Shipped projects appear here with a link to the work and the result.")+"</section>";
+  var top=P.filter(function(p){return p.status!=="Shipped"&&PRANK[p.priority]!=null}).sort(byPrio).slice(0,6);
+  html+='<section class="panel"><p class="q">What matters most</p><h3>Top priorities <a href="#board">Project board</a></h3>'+list(top.map(projRow),"No priorities set yet. Set High, Medium or Low on any project and the most important open work shows here.")+"</section>";
+  html+='<section class="panel"><p class="q">What has shipped</p><h3>Finished work</h3>'+list(shipped.slice(0,6).map(projRow),"Shipped projects appear here with a link to the work and the result.")+"</section>";
   html+='<section class="panel"><p class="q">Results and spend</p><h3>Budget</h3>'+(bud.length?'<p class="big">'+usd(ts)+" <small>spent of "+usd(tb)+" budgeted</small></p>"+bud.map(function(p){var b=Number(p.budget)||0,s=Number(p.spend)||0,w=b?Math.min(100,s/b*100):100;return '<div class="money"><div class="lab"><span>'+esc(p.name)+"</span><span>"+usd(s)+(b?" / "+usd(b):" (no budget set)")+'</span></div><div class="track"><span class="'+(b&&s>b?"over":"")+'" style="width:'+w+'%"></span></div></div>'}).join(""):'<p class="empty">No budgets entered yet. Add a budget and spend to any project and the totals appear here.</p>')+"</section>";
   html+="</div>";
   html+='<section class="panel"><p class="q">Status updates</p><h3>Latest from marketing <a href="#updates">All updates</a></h3>'+list(ups.map(updRow),"No updates posted yet. A short weekly note per project keeps this section current.")+"</section>";
@@ -98,36 +105,46 @@ function overviewBody(){
 }
 function card(p){
   var ask=S.decisions.some(function(d){return d.project===p.id&&(!d.status||d.status==="Waiting")});
-  var tags=[p.area?'<span class="tag">'+esc(p.area)+"</span>":"",p.store&&p.store!=="All stores"?'<span class="tag">'+esc(p.store)+"</span>":""].join("");
+  var tags=[p.category&&p.category!=="Uncategorized"?'<span class="tag">'+esc(p.category)+"</span>":"",p.store&&p.store!=="All stores"?'<span class="tag">'+esc(p.store)+"</span>":""].join("");
   var nd=docsOf(p).length, nr=relatedOf(p).length;
-  return '<article class="card" data-card="'+esc(p.id)+'" tabindex="0" role="link" aria-label="Open '+esc(p.name)+'"'+(canWrite&&db?' draggable="true"':"")+'><div class="t">'+esc(p.name)+"</div>"+(p.next?'<div class="s">Next: '+esc(p.next)+"</div>":"")+(p.result&&p.status==="Shipped"?'<div class="s">Result: '+esc(p.result)+"</div>":"")+'<div class="m">'+tags+"</div>"+(nd||nr?'<div class="m">'+[nd?nd+(nd===1?" doc":" docs"):"",nr?nr+" linked":""].filter(Boolean).map(function(x){return '<span class="tag">'+x+"</span>"}).join("")+"</div>":"")+((p.due&&p.status!=="Shipped")||ask||(p.status==="Shipped"&&p.shippedAt)?'<div class="m">'+(p.status==="Shipped"?'<span class="when">Shipped '+esc(fmt(p.shippedAt))+"</span>":when(p.due))+(ask?'<span class="pill" style="--c:var(--warn)">Needs leadership</span>':"")+"</div>":"")+"</article>";
+  return '<article class="card" data-card="'+esc(p.id)+'" tabindex="0" role="link" aria-label="Open '+esc(p.name)+'"'+(canWrite&&db?' draggable="true"':"")+'><div class="t">'+esc(p.name)+"</div>"+(p.next?'<div class="s">Next: '+esc(p.next)+"</div>":"")+(p.result&&p.status==="Shipped"?'<div class="s">Result: '+esc(p.result)+"</div>":"")+(p.priority&&PRANK[p.priority]!=null?'<div class="m">'+prioTag(p)+"</div>":"")+'<div class="m">'+tags+"</div>"+(nd||nr?'<div class="m">'+[nd?nd+(nd===1?" doc":" docs"):"",nr?nr+" linked":""].filter(Boolean).map(function(x){return '<span class="tag">'+x+"</span>"}).join("")+"</div>":"")+((p.due&&p.status!=="Shipped")||ask||(p.status==="Shipped"&&p.shippedAt)?'<div class="m">'+(p.status==="Shipped"?'<span class="when">Shipped '+esc(fmt(p.shippedAt))+"</span>":when(p.due))+(ask?'<span class="pill" style="--c:var(--warn)">Needs leadership</span>':"")+"</div>":"")+"</article>";
 }
 function projects(){
   var P=S.projects.slice().sort(function(a,b){return (a.order||999)-(b.order||999)||String(a.name).localeCompare(String(b.name))});
   var isList=filt.mode==="list";
-  var html=head("Project board",P.length+" projects across LaHaze and Newity."+(canWrite&&db&&!isList?" Drag a card to change its status, or open it to see its docs and history.":""),addBtn("projects","Add a project"));
-  html+='<div class="filters"><button class="chip" aria-pressed="'+!isList+'" data-mode="board">Board</button><button class="chip" aria-pressed="'+isList+'" data-mode="list">List</button><select class="f" id="f-store" aria-label="Filter by store"><option value="All">All stores</option>'+STORES.slice(1).map(function(x){return "<option"+(filt.store===x?" selected":"")+">"+esc(x)+"</option>"}).join("")+'</select><select class="f" id="f-area" aria-label="Filter by area"><option value="All">All areas</option>'+AREAS.map(function(x){return "<option"+(filt.area===x?" selected":"")+">"+esc(x)+"</option>"}).join("")+"</select></div>";
-  var F=P.filter(function(p){return (filt.area==="All"||p.area===filt.area)&&(filt.store==="All"||p.store===filt.store||(p.store==="All stores"&&filt.store!=="Newity"))});
+  var html=head("Project board",P.length+" projects across LaHaze and Newity."+(canWrite&&db&&!isList?" Drag a card to another column to change its status, or up and down to set its order. Open a card to see its docs and history.":""),addBtn("projects","Add a project"));
+  html+='<div class="filters"><button class="chip" aria-pressed="'+!isList+'" data-mode="board">Board</button><button class="chip" aria-pressed="'+isList+'" data-mode="list">List</button><select class="f" id="f-store" aria-label="Filter by store"><option value="All">All stores</option>'+STORES.slice(1).map(function(x){return "<option"+(filt.store===x?" selected":"")+">"+esc(x)+"</option>"}).join("")+'</select><select class="f" id="f-cat" aria-label="Filter by category"><option value="All">All categories</option>'+CATS.concat(["Uncategorized"]).map(function(x){return "<option"+(filt.cat===x?" selected":"")+">"+esc(x)+"</option>"}).join("")+'</select><select class="f" id="f-prio" aria-label="Filter by priority"><option value="All">Any priority</option>'+PRIOS.map(function(x){return '<option value="'+x+'"'+(filt.prio===x?" selected":"")+">"+x+" priority</option>"}).join("")+'<option value="none"'+(filt.prio==="none"?" selected":"")+">No priority set</option></select></div>";
+  var catOf=function(p){return CATS.indexOf(p.category)>=0?p.category:"Uncategorized"};
+  var F=P.filter(function(p){return (filt.cat==="All"||catOf(p)===filt.cat)&&(filt.prio==="All"||(filt.prio==="none"?PRANK[p.priority]==null:p.priority===filt.prio))&&(filt.store==="All"||p.store===filt.store||(p.store==="All stores"&&filt.store!=="Newity"))});
   if(!P.length) return html+'<p class="empty">'+(loaded?"No projects yet.":"")+'</p>';
   if(isList){
     if(!F.length) return html+'<p class="empty">No projects match these filters.</p>';
-    AREAS.concat(["Other"]).forEach(function(a){
-      var g=F.filter(function(p){return a==="Other"?AREAS.indexOf(p.area)<0:p.area===a});
-      if(g.length) html+='<section class="group"><h3>'+esc(a)+"</h3>"+('<div class="list">'+g.map(projRow).join("")+"</div>")+"</section>";
+    CATS.concat(["Uncategorized"]).forEach(function(a){
+      var g=F.filter(function(p){return catOf(p)===a}).sort(byPrio);
+      if(g.length) html+='<section class="group"><h3>'+esc(a)+(CATHINT[a]?' <span class="hint">'+esc(CATHINT[a])+"</span>":"")+"</h3>"+('<div class="list">'+g.map(projRow).join("")+"</div>")+"</section>";
     });
     return html;
   }
   var cols=PSTATUS.filter(function(st){return st!=="Not set"||F.some(function(p){return !p.status||p.status==="Not set"})});
   html+='<div class="board">'+cols.map(function(st){
     var g=F.filter(function(p){return (p.status||"Not set")===st});
-    if(st==="Shipped")g.sort(by("shippedAt",-1)); else g.sort(by("due"));
+    if(st==="Shipped")g.sort(by("shippedAt",-1)); else g.sort(function(a,b){return (a.order||999)-(b.order||999)});
     return '<section class="col" data-col="'+esc(st)+'"><h3><i class="sw" style="background:'+PCOLOR[st]+'"></i>'+esc(st==="Not set"?"To sort":st)+"<b>"+g.length+"</b></h3>"+(g.length?g.map(card).join(""):'<p class="colempty">'+(canWrite&&db?"Drop a card here":"Nothing here")+"</p>")+"</section>";
   }).join("")+"</div>";
   return html;
 }
-function move(id,st){
-  var p=S.projects.find(function(x){return x.id===id}); if(!p||!db||(p.status||"Not set")===st)return;
-  var u={status:st,updatedAt:today()}; if(st==="Shipped"&&!p.shippedAt)u.shippedAt=today();
+function move(id,st,beforeId){
+  var p=S.projects.find(function(x){return x.id===id}); if(!p||!db||beforeId===id)return;
+  var same=(p.status||"Not set")===st;
+  var colCards=S.projects.filter(function(q){return (q.status||"Not set")===st&&q.id!==id}).sort(function(a,b){return (a.order||999)-(b.order||999)});
+  var u={updatedAt:today()}, ord;
+  var i=beforeId?colCards.findIndex(function(q){return q.id===beforeId}):-1;
+  if(i>=0){var nxt=colCards[i].order||999, prv=i>0?(colCards[i-1].order||999):nxt-1; ord=(prv+nxt)/2}
+  else ord=colCards.reduce(function(m,q){return Math.max(m,q.order||0)},0)+1;
+  if(same&&st==="Shipped")return;
+  if(same&&ord===p.order)return;
+  u.order=ord;
+  if(!same){u.status=st; if(st==="Shipped"&&!p.shippedAt)u.shippedAt=today();}
   db.collection("projects").doc(id).update(u).catch(function(){problem="That card could not be moved. Check your connection and try again.";render()});
 }
 function approvals(){
@@ -200,7 +217,7 @@ function projectPage(){
   var facts=[["Next step",p.next],["Notes",p.note],["Result",p.result],["Due",p.due&&p.status!=="Shipped"?fmt(p.due)+" · "+rel_(p.due):""],["Shipped",p.shippedAt?fmt(p.shippedAt):""],["Budget",(Number(p.budget)||Number(p.spend))?usd(p.spend)+" spent of "+usd(p.budget):""],["Company",p.company],["Last updated",p.updatedAt?fmt(p.updatedAt):""]].filter(function(f){return f[1]});
   var w=canWrite&&db;
   var h='<p><a class="back" href="#board">← Project board</a></p>';
-  h+='<div class="head"><div><h2>'+esc(p.name)+'</h2><p class="m">'+pill(p.status)+(p.area?' <span class="tag">'+esc(p.area)+"</span>":"")+(p.store&&p.store!=="All stores"?' <span class="tag">'+esc(p.store)+"</span>":"")+"</p></div>"+(w?'<div class="acts"><button class="btn ghost" data-edit="projects:'+esc(p.id)+'">Edit project</button><button class="btn ghost" data-relate="'+esc(p.id)+'">Link a project</button><button class="btn" data-doc="'+esc(p.id)+'|">Add a doc or link</button></div>':"")+"</div>";
+  h+='<div class="head"><div><h2>'+esc(p.name)+'</h2><p class="m">'+pill(p.status)+prioTag(p)+(p.category?' <span class="tag">'+esc(p.category)+"</span>":"")+(p.area?' <span class="tag">'+esc(p.area)+"</span>":"")+(p.store&&p.store!=="All stores"?' <span class="tag">'+esc(p.store)+"</span>":"")+"</p></div>"+(w?'<div class="acts"><button class="btn ghost" data-edit="projects:'+esc(p.id)+'">Edit project</button><button class="btn ghost" data-relate="'+esc(p.id)+'">Link a project</button><button class="btn" data-doc="'+esc(p.id)+'|">Add a doc or link</button></div>':"")+"</div>";
   h+='<div class="grid">';
   h+='<section class="panel"><p class="q">Docs and files</p><h3>Latest work</h3>'+list(docs.map(function(d,i){return docRow(p,d,i===0&&docs.length>1,true)}),"No docs attached yet."+(w?" Add the latest version of anything this project uses: briefs, decks, designs, PDFs, Drive or Canva links.":""))+"</section>";
   h+='<section class="panel"><p class="q">Linked projects</p><h3>Related work</h3>'+list(rel.map(function(q){var ld=sortedDocs(q).filter(function(d){return d.kind!=="Email thread"});var top=ld[0];return '<div class="row"><div class="main"><div class="t">'+plink(q)+'</div>'+(top?'<div class="s">Latest: '+(safeUrl(top.url)?'<a href="'+esc(safeUrl(top.url))+'" target="_blank" rel="noopener">'+esc(top.title||top.url)+"</a>":esc(top.title))+(top.date?" · "+esc(fmt(top.date)):"")+"</div>":'<div class="s">No docs attached yet</div>')+'</div><div class="side">'+pill(q.status)+(w&&(p.related||[]).indexOf(q.id)>=0?'<button class="btn ghost sm" data-unlink="'+esc(p.id)+"|"+esc(q.id)+'">Unlink</button>':w&&(q.related||[]).indexOf(p.id)>=0?'<button class="btn ghost sm" data-unlink="'+esc(q.id)+"|"+esc(p.id)+'">Unlink</button>':"")+"</div></div>"}),"No linked projects. Link one when this project depends on another's work, like a plan that follows the brand guidelines.")+"</section>";
@@ -297,14 +314,14 @@ var cur=null;
 var HIDE_NEW={decisions:["outcome","decidedOn"],requests:["status","reply"],projects:["shippedAt","result","spend"]};
 function openForm(col,id){
   var sc=SCHEMA[col], ex=id?S[col].find(function(x){return x.id===id}):null, d=ex||{};
-  if(!ex){ if(col==="projects"){d={status:"Planned",company:"LaHaze",store:"All stores",area:"Campaigns"}} if(col==="updates"){d={date:today(),kind:"Progress"}} if(col==="decisions"){d={status:"Waiting",type:"Approval"}} if(col==="requests"){d={status:"New",priority:"Normal",store:"All stores"}} if(col==="vendors"){d={status:"Waiting on them",lastContact:today()}} }
+  if(!ex){ if(col==="projects"){d={status:"Planned",company:"LaHaze",store:"All stores",area:"Campaigns",category:"Direct marketing",order:S.projects.reduce(function(m,q){return Math.max(m,q.order||0)},0)+1}} if(col==="updates"){d={date:today(),kind:"Progress"}} if(col==="decisions"){d={status:"Waiting",type:"Approval"}} if(col==="requests"){d={status:"New",priority:"Normal",store:"All stores"}} if(col==="vendors"){d={status:"Waiting on them",lastContact:today()}} }
   cur={col:col,id:id,ex:ex,armed:false,defaults:ex?{}:d};
   var h="<h2>"+(ex?"Edit ":"New ")+esc(sc.one)+'</h2><div class="fields">';
   sc.fields.forEach(function(f){
     if(!ex&&(HIDE_NEW[col]||[]).indexOf(f[0])>=0)return;
     var k=f[0], v=d[k]==null?"":d[k], idn="f-"+col+"-"+k, inp;
     if(f[2]==="textarea") inp='<textarea id="'+idn+'">'+esc(v)+"</textarea>";
-    else if(f[2]==="select") inp='<select id="'+idn+'">'+f[3].map(function(o){return "<option"+(o===v?" selected":"")+">"+esc(o)+"</option>"}).join("")+"</select>";
+    else if(f[2]==="select") inp='<select id="'+idn+'">'+f[3].map(function(o){return "<option"+(o===v||(f[3].indexOf(v)<0&&(o==="Uncategorized"||o==="Not set"))?" selected":"")+">"+esc(o)+"</option>"}).join("")+"</select>";
     else if(f[2]==="project") inp='<select id="'+idn+'"><option value="">None / general</option>'+S.projects.slice().sort(by("name")).map(function(p){return '<option value="'+esc(p.id)+'"'+(p.id===v?" selected":"")+">"+esc(p.name)+"</option>"}).join("")+"</select>";
     else inp='<input id="'+idn+'" type="'+(f[2]==="number"?"number":f[2]==="date"?"date":"text")+'"'+(f[2]==="number"?' min="0" step="1"':"")+' value="'+esc(v)+'">';
     h+='<div class="fld'+(["select","date","number"].indexOf(f[2])<0?" wide":"")+'"><label for="'+idn+'">'+esc(f[1])+(f[3]===1?" (required)":"")+"</label>"+inp+"</div>";
@@ -334,6 +351,7 @@ $("#frm").addEventListener("submit",function(e){
   sc.fields.forEach(function(f){var el=document.getElementById("f-"+cur.col+"-"+f[0]);if(!el)return;var v=el.value.trim(); if(f[3]===1&&!v&&!bad)bad=f[1]; if(f[2]==="number"){if(v!=="")out[f[0]]=Number(v)}else out[f[0]]=v});
   if(bad){var el=$("#f-err");el.textContent=bad+" is required.";el.hidden=false;return}
   if(out.link&&!safeUrl(out.link)){var e2=$("#f-err");e2.textContent="The link must start with https://";e2.hidden=false;return}
+  if(cur.col==="projects"&&out.priority==="Not set")out.priority="";
   if(cur.col==="projects"&&out.status==="Shipped"&&!out.shippedAt)out.shippedAt=today();
   if(cur.col==="decisions"&&out.status!=="Waiting"&&!out.decidedOn)out.decidedOn=today();
   out.updatedAt=today(); $("#f-save").disabled=true;
@@ -363,9 +381,9 @@ document.addEventListener("keydown",function(e){var c=e.target.closest&&e.target
 var dragId="";
 document.addEventListener("dragstart",function(e){var c=e.target.closest&&e.target.closest("[data-card]");if(!c)return;dragId=c.dataset.card;try{e.dataTransfer.setData("text/plain",dragId);e.dataTransfer.effectAllowed="move"}catch(x){}c.classList.add("drag")});
 document.addEventListener("dragend",function(e){dragId="";var c=e.target.closest&&e.target.closest("[data-card]");if(c)c.classList.remove("drag");document.querySelectorAll(".col.over").forEach(function(x){x.classList.remove("over")})});
-document.addEventListener("dragover",function(e){var col=e.target.closest&&e.target.closest("[data-col]");if(!col||!dragId)return;e.preventDefault();document.querySelectorAll(".col.over").forEach(function(x){if(x!==col)x.classList.remove("over")});col.classList.add("over")});
-document.addEventListener("drop",function(e){var col=e.target.closest&&e.target.closest("[data-col]");if(!col||!dragId)return;e.preventDefault();var id=dragId;dragId="";move(id,col.dataset.col)});
-document.addEventListener("change",function(e){if(e.target.id==="f-store"){filt.store=e.target.value;keep();render()}if(e.target.id==="f-area"){filt.area=e.target.value;keep();render()}});
+document.addEventListener("dragover",function(e){var col=e.target.closest&&e.target.closest("[data-col]");if(!col||!dragId)return;e.preventDefault();document.querySelectorAll(".col.over").forEach(function(x){if(x!==col)x.classList.remove("over")});col.classList.add("over");var t=e.target.closest("[data-card]");document.querySelectorAll(".card.before").forEach(function(x){if(x!==t)x.classList.remove("before")});if(t&&t.dataset.card!==dragId)t.classList.add("before")});
+document.addEventListener("drop",function(e){var col=e.target.closest&&e.target.closest("[data-col]");if(!col||!dragId)return;e.preventDefault();var t=e.target.closest("[data-card]");var id=dragId;dragId="";document.querySelectorAll(".card.before").forEach(function(x){x.classList.remove("before")});move(id,col.dataset.col,t?t.dataset.card:null)});
+document.addEventListener("change",function(e){if(e.target.id==="f-store"){filt.store=e.target.value;keep();render()}if(e.target.id==="f-cat"){filt.cat=e.target.value;keep();render()}if(e.target.id==="f-prio"){filt.prio=e.target.value;keep();render()}});
 function keep(){try{localStorage.setItem("hq-filt",JSON.stringify(filt))}catch(e){}}
 window.addEventListener("hashchange",function(){render();window.scrollTo(0,0)});
 

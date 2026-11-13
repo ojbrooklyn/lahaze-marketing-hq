@@ -35,3 +35,10 @@ Select any card to open its project page: docs and files (newest dated version m
 linked projects with their latest doc, status updates, approvals and vendor threads for that project.
 With editing unlocked, "Add a doc or link" attaches any https link (Google Drive, Canva, Gmail, Dropbox...).
 The list is visible to anyone with the board link; the files themselves keep their own sharing settings.
+
+## Categories and priority
+
+Each project has a category (Direct marketing, Digital marketing, Operations, Membership, Subscriptions,
+Collaboration, Refresh website & GBP) and an optional priority (High, Medium, Low). The board filters by both, the
+list view groups by category, and the Briefing shows the top open priorities. Drag cards up and down within a column
+to set their order.
