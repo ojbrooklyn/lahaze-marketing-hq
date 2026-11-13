@@ -1,0 +1,299 @@
+(function(){
+"use strict";
+var STORES=["All stores","LaHaze (Cheboygan)","Lighthouse (Traverse City)","Parc (Alpena)","Newity"];
+var COMPANIES=["LaHaze","Newity"];
+var AREAS=["Campaigns","Brand","Web & digital","Retail","Content","Merch","Planning"];
+var PSTATUS=["Not set","Planned","In progress","In review","Blocked","Ongoing","Shipped"];
+var PCOLOR={"Not set":"var(--mute)","Planned":"var(--mute)","In progress":"var(--info)","In review":"var(--warn)","Blocked":"var(--bad)","Ongoing":"var(--teal)","Shipped":"var(--ok)"};
+var TONE={"Shipped":"ok","Approved":"ok","Done":"ok","Decided":"ok","Closed":"mute","In progress":"info","Accepted":"info","Scheduled":"info","Waiting on them":"info","Ongoing":"teal","In review":"warn","Waiting":"warn","New":"warn","Waiting on us":"warn","Blocked":"bad","Declined":"bad","Planned":"mute"};
+var SCHEMA={
+  projects:{one:"project",fields:[["name","Project name","text",1],["company","Company","select",COMPANIES],["area","Area","select",AREAS],["store","Store","select",STORES],["status","Status","select",PSTATUS],["due","Due date","date"],["next","Next step","text"],["note","Notes","textarea"],["link","Link to the work (https://…)","url"],["result","Result leadership can read (a number or outcome)","text"],["budget","Budget ($)","number"],["spend","Spent so far ($)","number"],["shippedAt","Shipped on","date"]]},
+  decisions:{one:"approval",fields:[["title","What needs a decision","text",1],["type","Type","select",["Approval","Decision","Budget"]],["project","Project","project"],["ask","The ask, in a sentence or two","textarea"],["from","Who decides","text"],["neededBy","Needed by","date"],["status","Status","select",["Waiting","Approved","Declined","Decided"]],["outcome","Outcome","textarea"],["decidedOn","Decided on","date"]]},
+  requests:{one:"request",fields:[["title","What do you need?","text",1],["from","Your name","text"],["store","Store","select",STORES],["detail","Details","textarea"],["priority","Priority","select",["Normal","Urgent","Whenever"]],["neededBy","Needed by","date"],["status","Status","select",["New","Accepted","In progress","Done","Declined"]],["reply","Reply from marketing","textarea"]]},
+  updates:{one:"update",fields:[["date","Date","date"],["project","Project","project"],["kind","Kind","select",["Progress","Shipped","Blocked","Heads up"]],["text","Update","textarea",1]]},
+  vendors:{one:"vendor thread",fields:[["vendor","Vendor or partner","text",1],["contact","Contact person","text"],["topic","Topic","text"],["project","Project","project"],["status","Status","select",["Waiting on them","Waiting on us","Scheduled","Closed"]],["lastContact","Last contact","date"],["next","Next step","text"]]},
+  dates:{one:"key date",fields:[["name","Name","text",1],["date","Date","date",1],["note","Note","text"]]}
+};
+var COLS=Object.keys(SCHEMA);
+var TABS=[["board","Board"],["overview","Briefing"],["approvals","Approvals"],["requests","Requests"],["updates","Updates"],["vendors","Vendors"]];
+var S={}; COLS.forEach(function(c){S[c]=[]});
+var db=null, canWrite=false, loaded=false, problem="", filt={status:"All",store:"All",area:"All",mode:"board"};
+var mode={storage:false,needsKey:false,key:""};
+try{var sv=JSON.parse(localStorage.getItem("hq-filt")||"null"); if(sv&&sv.store&&sv.area&&sv.mode) filt=sv;}catch(e){}
+try{mode.key=localStorage.getItem("hq-key")||""}catch(e){}
+
+var $=function(s){return document.querySelector(s)};
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+function today(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
+function diff(iso){return Math.round((Date.parse(iso+"T00:00:00")-Date.parse(today()+"T00:00:00"))/864e5)}
+function fmt(iso){if(!iso)return"";var d=new Date(iso+"T00:00:00");var o={month:"short",day:"numeric"};if(d.getFullYear()!==new Date().getFullYear())o.year="numeric";return d.toLocaleDateString("en-US",o)}
+function rel(iso){var n=diff(iso);return n===0?"today":n===1?"tomorrow":n>0?"in "+n+" days":n===-1?"yesterday":(-n)+" days ago"}
+function usd(n){return "$"+Math.round(Number(n)||0).toLocaleString("en-US")}
+function pname(id){var p=S.projects.find(function(x){return x.id===id});return p?p.name:""}
+function pill(st){if(!st||st==="Not set")return '<span class="pill unset">Status not set</span>';return '<span class="pill" style="--c:var(--'+(TONE[st]||"mute")+')">'+esc(st)+'</span>'}
+function when(iso,done){if(!iso)return"";var late=!done&&diff(iso)<0;return '<span class="when'+(late?" late":"")+'">'+esc(fmt(iso))+" · "+esc(rel(iso))+"</span>"}
+var quiet=false;
+function editBtn(col,id,force){return canWrite&&db&&(force||!quiet)?'<button class="btn ghost sm" data-edit="'+col+":"+esc(id)+'">Edit</button>':""}
+function addBtn(col,label){return canWrite&&db?'<button class="btn" data-add="'+col+'">'+esc(label)+"</button>":""}
+function safeUrl(u){return typeof u==="string"&&/^https:\/\//i.test(u)?u:""}
+function by(k,dir){return function(a,b){var x=a[k]||"",y=b[k]||"";if(!x&&y)return 1;if(x&&!y)return -1;return (x<y?-1:x>y?1:0)*(dir||1)}}
+function view(){var h=location.hash.replace("#","");return TABS.some(function(t){return t[0]===h})?h:"board"}
+
+/* ---------- rows ---------- */
+function projRow(p){
+  var u=safeUrl(p.link);
+  var sub=[p.next?"Next: "+p.next:"",p.note||""].filter(Boolean).join(" · ");
+  if(p.result) sub=(sub?sub+" · ":"")+"Result: "+p.result;
+  return '<div class="row"><div class="main"><div class="t">'+(u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(p.name)+"</a>":esc(p.name))+'</div>'+(sub?'<div class="s">'+esc(sub)+"</div>":"")+'</div><div class="side">'+(p.store&&p.store!=="All stores"?'<span class="tag">'+esc(p.store)+"</span>":"")+(p.status==="Shipped"?(p.shippedAt?'<span class="when">Shipped '+esc(fmt(p.shippedAt))+"</span>":""):when(p.due))+pill(p.status)+editBtn("projects",p.id)+"</div></div>";
+}
+function decRow(d){
+  var open=d.status==="Waiting"||!d.status;
+  var sub=[d.ask,pname(d.project)?"Project: "+pname(d.project):"",d.from?"Decides: "+d.from:"",!open&&d.outcome?"Outcome: "+d.outcome:""].filter(Boolean).join(" · ");
+  return '<div class="row"><div class="main"><div class="t">'+esc(d.title)+'</div>'+(sub?'<div class="s">'+esc(sub)+"</div>":"")+'</div><div class="side">'+(d.type?'<span class="tag">'+esc(d.type)+"</span>":"")+(open?when(d.neededBy):(d.decidedOn?'<span class="when">'+esc(fmt(d.decidedOn))+"</span>":""))+pill(d.status||"Waiting")+editBtn("decisions",d.id)+"</div></div>";
+}
+function reqRow(r){
+  var open=["Done","Declined"].indexOf(r.status)<0;
+  var sub=[r.detail,r.from?"From: "+r.from:"",r.reply?"Reply: "+r.reply:""].filter(Boolean).join(" · ");
+  return '<div class="row"><div class="main"><div class="t">'+esc(r.title)+'</div>'+(sub?'<div class="s">'+esc(sub)+"</div>":"")+'</div><div class="side">'+(r.priority==="Urgent"?'<span class="pill" style="--c:var(--bad)">Urgent</span>':"")+(r.store&&r.store!=="All stores"?'<span class="tag">'+esc(r.store)+"</span>":"")+(open?when(r.neededBy):"")+pill(r.status||"New")+editBtn("requests",r.id)+"</div></div>";
+}
+var KIND={"Progress":"info","Shipped":"ok","Blocked":"bad","Heads up":"warn"};
+function updRow(u){
+  return '<div class="row"><div class="main"><div class="t">'+esc(pname(u.project)||"General")+'</div><div class="s">'+esc(u.text)+'</div></div><div class="side"><span class="when">'+esc(fmt(u.date))+"</span>"+(u.kind?'<span class="pill" style="--c:var(--'+(KIND[u.kind]||"mute")+')">'+esc(u.kind)+"</span>":"")+editBtn("updates",u.id)+"</div></div>";
+}
+function venRow(v){
+  var sub=[v.topic,v.contact?"Contact: "+v.contact:"",pname(v.project)?"Project: "+pname(v.project):"",v.next?"Next: "+v.next:""].filter(Boolean).join(" · ");
+  return '<div class="row"><div class="main"><div class="t">'+esc(v.vendor)+'</div>'+(sub?'<div class="s">'+esc(sub)+"</div>":"")+'</div><div class="side">'+(v.lastContact?'<span class="when">Last contact '+esc(fmt(v.lastContact))+"</span>":"")+pill(v.status||"Waiting on them")+editBtn("vendors",v.id)+"</div></div>";
+}
+function list(rows,empty){return rows.length?'<div class="list">'+rows.join("")+"</div>":'<p class="empty">'+empty+"</p>"}
+function head(title,sub,btn){return '<div class="head"><div><h2>'+esc(title)+"</h2><p>"+esc(sub)+"</p></div>"+(btn||"")+"</div>"}
+
+/* ---------- views ---------- */
+function overview(){quiet=true;try{return overviewBody()}finally{quiet=false}}
+function overviewBody(){
+  var P=S.projects, n=P.length||1, html="";
+  var counts=PSTATUS.map(function(s){return [s,P.filter(function(p){return (p.status||"Not set")===s}).length]}).filter(function(c){return c[1]>0});
+  html+='<section class="statusbar" aria-label="Projects by status"><div class="bar">'+counts.map(function(c){return '<span style="width:'+(c[1]/n*100)+"%;background:"+PCOLOR[c[0]]+'" title="'+esc(c[0])+": "+c[1]+'"></span>'}).join("")+'</div><div class="legend">'+counts.map(function(c){return '<span><i class="sw" style="background:'+PCOLOR[c[0]]+'"></i>'+esc(c[0]==="Not set"?"Status not set":c[0])+" <b>"+c[1]+"</b></span>"}).join("")+"</div></section>";
+
+  var wait=S.decisions.filter(function(d){return !d.status||d.status==="Waiting"}).sort(by("neededBy"));
+  var ev=[];
+  S.dates.forEach(function(d){if(d.date&&diff(d.date)>=0)ev.push({d:d.date,t:d.name,s:d.note||"Key date",id:d.id})});
+  P.forEach(function(p){if(p.due&&p.status!=="Shipped"&&diff(p.due)>=-30)ev.push({d:p.due,t:p.name,s:diff(p.due)<0?"Project overdue":"Project due",st:p.status})});
+  S.requests.forEach(function(r){if(r.neededBy&&["Done","Declined"].indexOf(r.status)<0)ev.push({d:r.neededBy,t:r.title,s:diff(r.neededBy)<0?"Request overdue":"Request needed"})});
+  ev.sort(by("d")); ev=ev.slice(0,8);
+  var shipped=P.filter(function(p){return p.status==="Shipped"}).sort(by("shippedAt",-1));
+  var bud=P.filter(function(p){return Number(p.budget)>0||Number(p.spend)>0});
+  var tb=bud.reduce(function(a,p){return a+(Number(p.budget)||0)},0), ts=bud.reduce(function(a,p){return a+(Number(p.spend)||0)},0);
+  var ups=S.updates.slice().sort(by("date",-1)).slice(0,5);
+
+  html+='<div class="grid">';
+  html+='<section class="panel"><p class="q">What needs leadership</p><h3>Waiting on a decision <a href="#approvals">All approvals</a></h3>'+list(wait.slice(0,5).map(decRow),"Nothing is waiting on leadership. Approvals, budget asks and blockers show up here the moment they are logged.")+"</section>";
+  html+='<section class="panel"><p class="q">Dates and deadlines</p><h3>Coming up '+(canWrite&&db?'<a href="#" data-add="dates">Add a date</a>':"")+"</h3>"+list(ev.map(function(e){return '<div class="row"><div class="main"><div class="t">'+esc(e.t)+'</div><div class="s">'+esc(e.s)+'</div></div><div class="side">'+when(e.d)+(e.id?editBtn("dates",e.id,true):"")+"</div></div>"}),"No dates yet. Project due dates, request deadlines and key retail dates appear here in order.")+"</section>";
+  html+='<section class="panel"><p class="q">What has shipped</p><h3>Finished work <a href="#board">Project board</a></h3>'+list(shipped.slice(0,6).map(projRow),"Shipped projects appear here with a link to the work and the result.")+"</section>";
+  html+='<section class="panel"><p class="q">Results and spend</p><h3>Budget</h3>'+(bud.length?'<p class="big">'+usd(ts)+" <small>spent of "+usd(tb)+" budgeted</small></p>"+bud.map(function(p){var b=Number(p.budget)||0,s=Number(p.spend)||0,w=b?Math.min(100,s/b*100):100;return '<div class="money"><div class="lab"><span>'+esc(p.name)+"</span><span>"+usd(s)+(b?" / "+usd(b):" (no budget set)")+'</span></div><div class="track"><span class="'+(b&&s>b?"over":"")+'" style="width:'+w+'%"></span></div></div>'}).join(""):'<p class="empty">No budgets entered yet. Add a budget and spend to any project and the totals appear here.</p>')+"</section>";
+  html+="</div>";
+  html+='<section class="panel"><p class="q">Status updates</p><h3>Latest from marketing <a href="#updates">All updates</a></h3>'+list(ups.map(updRow),"No updates posted yet. A short weekly note per project keeps this section current.")+"</section>";
+  return html;
+}
+function card(p){
+  var ask=S.decisions.some(function(d){return d.project===p.id&&(!d.status||d.status==="Waiting")});
+  var tags=[p.area?'<span class="tag">'+esc(p.area)+"</span>":"",p.store&&p.store!=="All stores"?'<span class="tag">'+esc(p.store)+"</span>":""].join("");
+  return '<article class="card" data-card="'+esc(p.id)+'"'+(canWrite&&db?' draggable="true" tabindex="0" role="button" aria-label="Edit '+esc(p.name)+'"':"")+'><div class="t">'+esc(p.name)+"</div>"+(p.next?'<div class="s">Next: '+esc(p.next)+"</div>":"")+(p.result&&p.status==="Shipped"?'<div class="s">Result: '+esc(p.result)+"</div>":"")+'<div class="m">'+tags+"</div>"+((p.due&&p.status!=="Shipped")||ask||(p.status==="Shipped"&&p.shippedAt)?'<div class="m">'+(p.status==="Shipped"?'<span class="when">Shipped '+esc(fmt(p.shippedAt))+"</span>":when(p.due))+(ask?'<span class="pill" style="--c:var(--warn)">Needs leadership</span>':"")+"</div>":"")+"</article>";
+}
+function projects(){
+  var P=S.projects.slice().sort(function(a,b){return (a.order||999)-(b.order||999)||String(a.name).localeCompare(String(b.name))});
+  var isList=filt.mode==="list";
+  var html=head("Project board",P.length+" projects across LaHaze and Newity."+(canWrite&&db&&!isList?" Drag a card to change its status, or select it to edit.":""),addBtn("projects","Add a project"));
+  html+='<div class="filters"><button class="chip" aria-pressed="'+!isList+'" data-mode="board">Board</button><button class="chip" aria-pressed="'+isList+'" data-mode="list">List</button><select class="f" id="f-store" aria-label="Filter by store"><option value="All">All stores</option>'+STORES.slice(1).map(function(x){return "<option"+(filt.store===x?" selected":"")+">"+esc(x)+"</option>"}).join("")+'</select><select class="f" id="f-area" aria-label="Filter by area"><option value="All">All areas</option>'+AREAS.map(function(x){return "<option"+(filt.area===x?" selected":"")+">"+esc(x)+"</option>"}).join("")+"</select></div>";
+  var F=P.filter(function(p){return (filt.area==="All"||p.area===filt.area)&&(filt.store==="All"||p.store===filt.store||(p.store==="All stores"&&filt.store!=="Newity"))});
+  if(!P.length) return html+'<p class="empty">'+(loaded?"No projects yet.":"")+'</p>';
+  if(isList){
+    if(!F.length) return html+'<p class="empty">No projects match these filters.</p>';
+    AREAS.concat(["Other"]).forEach(function(a){
+      var g=F.filter(function(p){return a==="Other"?AREAS.indexOf(p.area)<0:p.area===a});
+      if(g.length) html+='<section class="group"><h3>'+esc(a)+"</h3>"+('<div class="list">'+g.map(projRow).join("")+"</div>")+"</section>";
+    });
+    return html;
+  }
+  var cols=PSTATUS.filter(function(st){return st!=="Not set"||F.some(function(p){return !p.status||p.status==="Not set"})});
+  html+='<div class="board">'+cols.map(function(st){
+    var g=F.filter(function(p){return (p.status||"Not set")===st});
+    if(st==="Shipped")g.sort(by("shippedAt",-1)); else g.sort(by("due"));
+    return '<section class="col" data-col="'+esc(st)+'"><h3><i class="sw" style="background:'+PCOLOR[st]+'"></i>'+esc(st==="Not set"?"To sort":st)+"<b>"+g.length+"</b></h3>"+(g.length?g.map(card).join(""):'<p class="colempty">'+(canWrite&&db?"Drop a card here":"Nothing here")+"</p>")+"</section>";
+  }).join("")+"</div>";
+  return html;
+}
+function move(id,st){
+  var p=S.projects.find(function(x){return x.id===id}); if(!p||!db||(p.status||"Not set")===st)return;
+  var u={status:st,updatedAt:today()}; if(st==="Shipped"&&!p.shippedAt)u.shippedAt=today();
+  db.collection("projects").doc(id).update(u).catch(function(){problem="That card could not be moved. Check your connection and try again.";render()});
+}
+function approvals(){
+  var open=S.decisions.filter(function(d){return !d.status||d.status==="Waiting"}).sort(by("neededBy"));
+  var done=S.decisions.filter(function(d){return d.status&&d.status!=="Waiting"}).sort(by("decidedOn",-1));
+  return head("Approvals and decisions","What is waiting on leadership, and a permanent record of what was decided.",addBtn("decisions","Log a decision"))+
+    '<section class="group"><h3>Waiting</h3>'+list(open.map(decRow),"Nothing is waiting. Log an approval, a budget ask or a decision you need and it lands on the briefing.")+"</section>"+
+    '<section class="group"><h3>Decision log</h3>'+list(done.map(decRow),"Decided items move here with the outcome and date, so nobody has to dig through texts or email.")+"</section>";
+}
+function requests(){
+  var open=S.requests.filter(function(r){return ["Done","Declined"].indexOf(r.status)<0}).sort(by("neededBy"));
+  var done=S.requests.filter(function(r){return ["Done","Declined"].indexOf(r.status)>=0}).sort(by("updatedAt",-1));
+  return head("Requests","Ask marketing for something and follow it here: signage, a promo, a post, a menu change.",addBtn("requests","Submit a request"))+
+    '<section class="group"><h3>Open</h3>'+list(open.map(reqRow),"No open requests. Store managers and leadership can submit one here, and each request shows its status and a reply.")+"</section>"+
+    (done.length?'<section class="group"><h3>Closed</h3>'+list(done.map(reqRow),"")+"</section>":"");
+}
+function updates(){
+  var U=S.updates.slice().sort(by("date",-1));
+  return head("Status updates","Short notes per project, newest first. Readable in two minutes.",addBtn("updates","Post an update"))+list(U.map(updRow),"No updates yet. Post what moved, what shipped and what is blocked.");
+}
+function vendors(){
+  var open=S.vendors.filter(function(v){return v.status!=="Closed"}).sort(by("lastContact"));
+  var done=S.vendors.filter(function(v){return v.status==="Closed"});
+  return head("Vendors and partners","Printers, POS and menu providers, agencies and suppliers: who we are talking to and where each thread stands.",addBtn("vendors","Add a thread"))+
+    '<section class="group"><h3>Open threads</h3>'+list(open.map(venRow),"No vendor threads yet. Add one per conversation, with the last contact date and the next step.")+"</section>"+
+    (done.length?'<section class="group"><h3>Closed</h3>'+list(done.map(venRow),"")+"</section>":"");
+}
+var VIEWS={board:projects,overview:overview,approvals:approvals,requests:requests,updates:updates,vendors:vendors};
+
+function render(){
+  var v=view(), P=S.projects;
+  var w=S.decisions.filter(function(d){return !d.status||d.status==="Waiting"}).length;
+  var nr=S.requests.filter(function(r){return !r.status||r.status==="New"}).length;
+  $("#tabs").innerHTML=TABS.map(function(t){var c=t[0]==="approvals"?w:t[0]==="requests"?nr:0;return '<a href="#'+t[0]+'"'+(v===t[0]?' aria-current="page"':"")+">"+t[1]+(c?'<span class="count">'+c+"</span>":"")+"</a>"}).join("");
+  if(loaded&&P.length){
+    var live=P.filter(function(p){return ["In progress","In review","Ongoing"].indexOf(p.status)>=0}).length, sh=P.filter(function(p){return p.status==="Shipped"}).length;
+    var lu="";COLS.forEach(function(c){S[c].forEach(function(x){if(x.updatedAt&&x.updatedAt>lu)lu=x.updatedAt})});
+    var nx=S.dates.filter(function(d){return d.date&&diff(d.date)>=0}).sort(by("date"))[0];
+    $("#brief").innerHTML="<b>"+P.length+" projects</b> across Cheboygan, Traverse City and Alpena. <b>"+sh+"</b> shipped, <b>"+live+"</b> in motion, <b>"+w+"</b> waiting on leadership"+(nx?". Next key date: <b>"+esc(nx.name)+"</b>, "+esc(rel(nx.date)):"")+"."+(lu?" Last updated "+esc(rel(lu))+".":"");
+  }
+  var top=problem?'<p class="notice">'+esc(problem)+"</p>":"";
+  if(!loaded&&!problem) top='<p class="empty">Loading the tracker…</p>';
+  $("#app").innerHTML=top+VIEWS[v]();
+  var f="";
+  if(loaded){
+    if(!mode.storage) f="Preview mode: storage is not connected yet, so changes save in this browser only.";
+    else if(canWrite) f="Changes save for everyone as you make them."+(mode.needsKey?' <button class="linkbtn" id="lock">Lock editing on this device</button>':"");
+    else f='You are viewing a read-only copy. Send requests and approvals to the marketing manager. <button class="linkbtn" id="unlock">Unlock editing</button>';
+  }
+  $("#foot").innerHTML=f;
+}
+
+/* ---------- data layer: talks to /api/data, or to this browser when storage is not connected ---------- */
+var LOCAL="hq-local";
+function saveLocal(){try{localStorage.setItem(LOCAL,JSON.stringify(S))}catch(e){}}
+function apiErr(r,j){var e=new Error((j&&j.error)||("http "+r.status));e.status=r.status;e.code=j&&j.error;return e}
+function send(body){
+  if(!mode.storage){saveLocal();return Promise.resolve({ok:true})}
+  return fetch("/api/data",{method:"POST",headers:{"Content-Type":"application/json","X-Edit-Key":mode.key||""},body:JSON.stringify(body)})
+    .then(function(r){return r.json().catch(function(){return {}}).then(function(j){if(!r.ok)throw apiErr(r,j);return j})});
+}
+function find(col,id){return S[col].findIndex(function(x){return x.id===id})}
+function rollback(e){refresh();throw e}
+function makeDb(){
+  return {collection:function(col){
+    return {
+      doc:function(id){return {
+        update:function(u){var i=find(col,id);if(i>=0)S[col][i]=Object.assign({},S[col][i],u);render();return send({op:"update",col:col,id:id,doc:u}).catch(rollback)},
+        set:function(m){var i=find(col,id),d=Object.assign({},m,{id:id});if(i>=0)S[col][i]=d;else S[col].push(d);render();return send({op:"set",col:col,id:id,doc:m}).catch(rollback)},
+        delete:function(){var i=find(col,id);if(i>=0)S[col].splice(i,1);render();return send({op:"delete",col:col,id:id}).catch(rollback)}
+      }},
+      add:function(d){
+        if(!mode.storage){var id="local-"+Date.now().toString(36);S[col].push(Object.assign({},d,{id:id}));render();saveLocal();return Promise.resolve({id:id})}
+        return send({op:"add",col:col,doc:d}).then(function(j){S[col].push(j.doc);render();return j});
+      }
+    };
+  }};
+}
+var busy=false;
+function refresh(){
+  if(busy)return Promise.resolve(); busy=true;
+  return fetch("/api/data",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json()}).then(function(j){
+    mode.storage=!!j.storage; mode.needsKey=!!j.needsKey;
+    var data=j.data||{};
+    if(!mode.storage){try{var loc=JSON.parse(localStorage.getItem(LOCAL)||"null");if(loc&&loc.projects)data=loc}catch(e){}}
+    COLS.forEach(function(c){S[c]=Array.isArray(data[c])?data[c]:[]});
+    canWrite=!mode.storage||!mode.needsKey||!!mode.key;
+    db=makeDb(); loaded=true; problem="";
+    if(!$("#dlg").open&&!dragId)render();
+  }).catch(function(){
+    if(!loaded){problem="The tracker data can't be reached right now. Reload the page to try again.";render()}
+  }).then(function(){busy=false});
+}
+
+/* ---------- forms ---------- */
+var cur=null;
+var HIDE_NEW={decisions:["outcome","decidedOn"],requests:["status","reply"],projects:["shippedAt","result","spend"]};
+function openForm(col,id){
+  var sc=SCHEMA[col], ex=id?S[col].find(function(x){return x.id===id}):null, d=ex||{};
+  if(!ex){ if(col==="projects"){d={status:"Planned",company:"LaHaze",store:"All stores",area:"Campaigns"}} if(col==="updates"){d={date:today(),kind:"Progress"}} if(col==="decisions"){d={status:"Waiting",type:"Approval"}} if(col==="requests"){d={status:"New",priority:"Normal",store:"All stores"}} if(col==="vendors"){d={status:"Waiting on them",lastContact:today()}} }
+  cur={col:col,id:id,ex:ex,armed:false,defaults:ex?{}:d};
+  var h="<h2>"+(ex?"Edit ":"New ")+esc(sc.one)+'</h2><div class="fields">';
+  sc.fields.forEach(function(f){
+    if(!ex&&(HIDE_NEW[col]||[]).indexOf(f[0])>=0)return;
+    var k=f[0], v=d[k]==null?"":d[k], idn="f-"+col+"-"+k, inp;
+    if(f[2]==="textarea") inp='<textarea id="'+idn+'">'+esc(v)+"</textarea>";
+    else if(f[2]==="select") inp='<select id="'+idn+'">'+f[3].map(function(o){return "<option"+(o===v?" selected":"")+">"+esc(o)+"</option>"}).join("")+"</select>";
+    else if(f[2]==="project") inp='<select id="'+idn+'"><option value="">None / general</option>'+S.projects.slice().sort(by("name")).map(function(p){return '<option value="'+esc(p.id)+'"'+(p.id===v?" selected":"")+">"+esc(p.name)+"</option>"}).join("")+"</select>";
+    else inp='<input id="'+idn+'" type="'+(f[2]==="number"?"number":f[2]==="date"?"date":"text")+'"'+(f[2]==="number"?' min="0" step="1"':"")+' value="'+esc(v)+'">';
+    h+='<div class="fld'+(["select","date","number"].indexOf(f[2])<0?" wide":"")+'"><label for="'+idn+'">'+esc(f[1])+(f[3]===1?" (required)":"")+"</label>"+inp+"</div>";
+  });
+  h+='</div><p class="err" id="f-err" hidden></p><div class="actions">'+(ex?'<button type="button" class="btn danger" id="f-del">Delete</button>':"")+'<span class="sp"></span><button type="button" class="btn ghost" id="f-cancel">Cancel</button><button type="submit" class="btn" id="f-save">Save</button></div>';
+  $("#frm").innerHTML=h; $("#dlg").showModal();
+}
+function openUnlock(){
+  cur={col:"__unlock"};
+  $("#frm").innerHTML='<h2>Unlock editing</h2><p class="sub">Enter the edit passcode from the marketing manager. It is remembered on this device.</p><div class="fields"><div class="fld wide"><label for="f-key">Edit passcode</label><input id="f-key" type="password" autocomplete="current-password"></div></div><p class="err" id="f-err" hidden></p><div class="actions"><span class="sp"></span><button type="button" class="btn ghost" id="f-cancel">Cancel</button><button type="submit" class="btn" id="f-save">Unlock</button></div>';
+  $("#dlg").showModal(); $("#f-key").focus();
+}
+function fail(e){var m=e&&e.status===401?"The edit passcode was not accepted. Lock and unlock editing again with the right passcode.":e&&e.code==="too_big"?"That entry is too long. Shorten the notes and try again.":"Could not save. Check your connection and try again.";var el=$("#f-err");if(!el)return;el.textContent=m;el.hidden=false;$("#f-save").disabled=false}
+$("#frm").addEventListener("submit",function(e){
+  e.preventDefault(); if(!cur)return;
+  if(cur.col==="__unlock"){
+    var k=$("#f-key").value.trim(); if(!k)return; $("#f-save").disabled=true;
+    fetch("/api/data",{method:"POST",headers:{"Content-Type":"application/json","X-Edit-Key":k},body:'{"op":"check"}'}).then(function(r){
+      if(!r.ok){var el=$("#f-err");el.textContent="That passcode is not right.";el.hidden=false;$("#f-save").disabled=false;return}
+      mode.key=k;try{localStorage.setItem("hq-key",k)}catch(x){} canWrite=true; $("#dlg").close(); render();
+    },function(){fail()});
+    return;
+  }
+  if(!db)return;
+  var sc=SCHEMA[cur.col], out=Object.assign({},cur.defaults), bad="";
+  sc.fields.forEach(function(f){var el=document.getElementById("f-"+cur.col+"-"+f[0]);if(!el)return;var v=el.value.trim(); if(f[3]===1&&!v&&!bad)bad=f[1]; if(f[2]==="number"){if(v!=="")out[f[0]]=Number(v)}else out[f[0]]=v});
+  if(bad){var el=$("#f-err");el.textContent=bad+" is required.";el.hidden=false;return}
+  if(out.link&&!safeUrl(out.link)){var e2=$("#f-err");e2.textContent="The link must start with https://";e2.hidden=false;return}
+  if(cur.col==="projects"&&out.status==="Shipped"&&!out.shippedAt)out.shippedAt=today();
+  if(cur.col==="decisions"&&out.status!=="Waiting"&&!out.decidedOn)out.decidedOn=today();
+  out.updatedAt=today(); $("#f-save").disabled=true;
+  var c=db.collection(cur.col), p;
+  if(cur.ex){var m=Object.assign({},cur.ex,out);delete m.id; if(!("budget" in out))delete m.budget; if(!("spend" in out))delete m.spend; p=c.doc(cur.id).set(m)}
+  else{out.createdAt=today(); p=c.add(out)}
+  p.then(function(){$("#dlg").close()},fail);
+});
+$("#frm").addEventListener("click",function(e){
+  if(e.target.id==="f-cancel")$("#dlg").close();
+  if(e.target.id==="f-del"&&cur&&db){ if(!cur.armed){cur.armed=true;e.target.textContent="Click again to delete for everyone";return} db.collection(cur.col).doc(cur.id).delete().then(function(){$("#dlg").close()},fail)}
+});
+$("#dlg").addEventListener("close",function(){render()});
+document.addEventListener("click",function(e){
+  if(e.target.id==="unlock"){openUnlock();return}
+  if(e.target.id==="lock"){mode.key="";try{localStorage.removeItem("hq-key")}catch(x){}canWrite=false;render();return}
+  var t=e.target.closest("[data-edit],[data-add]");
+  if(t){ if(t.dataset.add){e.preventDefault();openForm(t.dataset.add,null)} else {var a=t.dataset.edit.split(":");openForm(a[0],a.slice(1).join(":"))} return }
+  var m=e.target.closest("[data-mode]"); if(m){filt.mode=m.dataset.mode;keep();render();return}
+  var c=e.target.closest("[data-card]"); if(c&&canWrite&&db)openForm("projects",c.dataset.card);
+});
+document.addEventListener("keydown",function(e){var c=e.target.closest&&e.target.closest("[data-card]");if(c&&(e.key==="Enter"||e.key===" ")&&canWrite&&db){e.preventDefault();openForm("projects",c.dataset.card)}});
+var dragId="";
+document.addEventListener("dragstart",function(e){var c=e.target.closest&&e.target.closest("[data-card]");if(!c)return;dragId=c.dataset.card;try{e.dataTransfer.setData("text/plain",dragId);e.dataTransfer.effectAllowed="move"}catch(x){}c.classList.add("drag")});
+document.addEventListener("dragend",function(e){dragId="";var c=e.target.closest&&e.target.closest("[data-card]");if(c)c.classList.remove("drag");document.querySelectorAll(".col.over").forEach(function(x){x.classList.remove("over")})});
+document.addEventListener("dragover",function(e){var col=e.target.closest&&e.target.closest("[data-col]");if(!col||!dragId)return;e.preventDefault();document.querySelectorAll(".col.over").forEach(function(x){if(x!==col)x.classList.remove("over")});col.classList.add("over")});
+document.addEventListener("drop",function(e){var col=e.target.closest&&e.target.closest("[data-col]");if(!col||!dragId)return;e.preventDefault();var id=dragId;dragId="";move(id,col.dataset.col)});
+document.addEventListener("change",function(e){if(e.target.id==="f-store"){filt.store=e.target.value;keep();render()}if(e.target.id==="f-area"){filt.area=e.target.value;keep();render()}});
+function keep(){try{localStorage.setItem("hq-filt",JSON.stringify(filt))}catch(e){}}
+window.addEventListener("hashchange",function(){render();window.scrollTo(0,0)});
+
+/* ---------- start: load now, then pick up teammates' changes every 20 seconds ---------- */
+render();
+refresh();
+setInterval(function(){if(!document.hidden&&mode.storage)refresh()},20000);
+document.addEventListener("visibilitychange",function(){if(!document.hidden&&mode.storage)refresh()});
+})();
