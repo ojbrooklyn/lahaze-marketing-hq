@@ -37,14 +37,16 @@ function editBtn(col,id,force){return canWrite&&db&&(force||!quiet)?'<button cla
 function addBtn(col,label){return canWrite&&db?'<button class="btn" data-add="'+col+'">'+esc(label)+"</button>":""}
 function safeUrl(u){return typeof u==="string"&&/^https:\/\//i.test(u)?u:""}
 function by(k,dir){return function(a,b){var x=a[k]||"",y=b[k]||"";if(!x&&y)return 1;if(x&&!y)return -1;return (x<y?-1:x>y?1:0)*(dir||1)}}
-function view(){var h=location.hash.replace("#","");return TABS.some(function(t){return t[0]===h})?h:"board"}
+function view(){var h=location.hash.replace("#","");if(h.indexOf("p/")===0&&S.projects.some(function(p){return p.id===decodeURIComponent(h.slice(2))}))return "project";if(h.indexOf("p/")===0&&!loaded)return "project";return TABS.some(function(t){return t[0]===h})?h:"board"}
+function pid(){return decodeURIComponent(location.hash.replace("#","").slice(2))}
+function plink(p){return '<a href="#p/'+encodeURIComponent(p.id)+'">'+esc(p.name)+"</a>"}
 
 /* ---------- rows ---------- */
 function projRow(p){
   var u=safeUrl(p.link);
   var sub=[p.next?"Next: "+p.next:"",p.note||""].filter(Boolean).join(" · ");
   if(p.result) sub=(sub?sub+" · ":"")+"Result: "+p.result;
-  return '<div class="row"><div class="main"><div class="t">'+(u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(p.name)+"</a>":esc(p.name))+'</div>'+(sub?'<div class="s">'+esc(sub)+"</div>":"")+'</div><div class="side">'+(p.store&&p.store!=="All stores"?'<span class="tag">'+esc(p.store)+"</span>":"")+(p.status==="Shipped"?(p.shippedAt?'<span class="when">Shipped '+esc(fmt(p.shippedAt))+"</span>":""):when(p.due))+pill(p.status)+editBtn("projects",p.id)+"</div></div>";
+  return '<div class="row"><div class="main"><div class="t">'+plink(p)+'</div>'+(sub?'<div class="s">'+esc(sub)+"</div>":"")+'</div><div class="side">'+(p.store&&p.store!=="All stores"?'<span class="tag">'+esc(p.store)+"</span>":"")+(p.status==="Shipped"?(p.shippedAt?'<span class="when">Shipped '+esc(fmt(p.shippedAt))+"</span>":""):when(p.due))+pill(p.status)+editBtn("projects",p.id)+"</div></div>";
 }
 function decRow(d){
   var open=d.status==="Waiting"||!d.status;
@@ -97,12 +99,13 @@ function overviewBody(){
 function card(p){
   var ask=S.decisions.some(function(d){return d.project===p.id&&(!d.status||d.status==="Waiting")});
   var tags=[p.area?'<span class="tag">'+esc(p.area)+"</span>":"",p.store&&p.store!=="All stores"?'<span class="tag">'+esc(p.store)+"</span>":""].join("");
-  return '<article class="card" data-card="'+esc(p.id)+'"'+(canWrite&&db?' draggable="true" tabindex="0" role="button" aria-label="Edit '+esc(p.name)+'"':"")+'><div class="t">'+esc(p.name)+"</div>"+(p.next?'<div class="s">Next: '+esc(p.next)+"</div>":"")+(p.result&&p.status==="Shipped"?'<div class="s">Result: '+esc(p.result)+"</div>":"")+'<div class="m">'+tags+"</div>"+((p.due&&p.status!=="Shipped")||ask||(p.status==="Shipped"&&p.shippedAt)?'<div class="m">'+(p.status==="Shipped"?'<span class="when">Shipped '+esc(fmt(p.shippedAt))+"</span>":when(p.due))+(ask?'<span class="pill" style="--c:var(--warn)">Needs leadership</span>':"")+"</div>":"")+"</article>";
+  var nd=docsOf(p).length, nr=relatedOf(p).length;
+  return '<article class="card" data-card="'+esc(p.id)+'" tabindex="0" role="link" aria-label="Open '+esc(p.name)+'"'+(canWrite&&db?' draggable="true"':"")+'><div class="t">'+esc(p.name)+"</div>"+(p.next?'<div class="s">Next: '+esc(p.next)+"</div>":"")+(p.result&&p.status==="Shipped"?'<div class="s">Result: '+esc(p.result)+"</div>":"")+'<div class="m">'+tags+"</div>"+(nd||nr?'<div class="m">'+[nd?nd+(nd===1?" doc":" docs"):"",nr?nr+" linked":""].filter(Boolean).map(function(x){return '<span class="tag">'+x+"</span>"}).join("")+"</div>":"")+((p.due&&p.status!=="Shipped")||ask||(p.status==="Shipped"&&p.shippedAt)?'<div class="m">'+(p.status==="Shipped"?'<span class="when">Shipped '+esc(fmt(p.shippedAt))+"</span>":when(p.due))+(ask?'<span class="pill" style="--c:var(--warn)">Needs leadership</span>':"")+"</div>":"")+"</article>";
 }
 function projects(){
   var P=S.projects.slice().sort(function(a,b){return (a.order||999)-(b.order||999)||String(a.name).localeCompare(String(b.name))});
   var isList=filt.mode==="list";
-  var html=head("Project board",P.length+" projects across LaHaze and Newity."+(canWrite&&db&&!isList?" Drag a card to change its status, or select it to edit.":""),addBtn("projects","Add a project"));
+  var html=head("Project board",P.length+" projects across LaHaze and Newity."+(canWrite&&db&&!isList?" Drag a card to change its status, or open it to see its docs and history.":""),addBtn("projects","Add a project"));
   html+='<div class="filters"><button class="chip" aria-pressed="'+!isList+'" data-mode="board">Board</button><button class="chip" aria-pressed="'+isList+'" data-mode="list">List</button><select class="f" id="f-store" aria-label="Filter by store"><option value="All">All stores</option>'+STORES.slice(1).map(function(x){return "<option"+(filt.store===x?" selected":"")+">"+esc(x)+"</option>"}).join("")+'</select><select class="f" id="f-area" aria-label="Filter by area"><option value="All">All areas</option>'+AREAS.map(function(x){return "<option"+(filt.area===x?" selected":"")+">"+esc(x)+"</option>"}).join("")+"</select></div>";
   var F=P.filter(function(p){return (filt.area==="All"||p.area===filt.area)&&(filt.store==="All"||p.store===filt.store||(p.store==="All stores"&&filt.store!=="Newity"))});
   if(!P.length) return html+'<p class="empty">'+(loaded?"No projects yet.":"")+'</p>';
@@ -152,13 +155,13 @@ function vendors(){
     '<section class="group"><h3>Open threads</h3>'+list(open.map(venRow),"No vendor threads yet. Add one per conversation, with the last contact date and the next step.")+"</section>"+
     (done.length?'<section class="group"><h3>Closed</h3>'+list(done.map(venRow),"")+"</section>":"");
 }
-var VIEWS={board:projects,overview:overview,approvals:approvals,requests:requests,updates:updates,vendors:vendors};
+var VIEWS={project:projectPage,board:projects,overview:overview,approvals:approvals,requests:requests,updates:updates,vendors:vendors};
 
 function render(){
   var v=view(), P=S.projects;
   var w=S.decisions.filter(function(d){return !d.status||d.status==="Waiting"}).length;
   var nr=S.requests.filter(function(r){return !r.status||r.status==="New"}).length;
-  $("#tabs").innerHTML=TABS.map(function(t){var c=t[0]==="approvals"?w:t[0]==="requests"?nr:0;return '<a href="#'+t[0]+'"'+(v===t[0]?' aria-current="page"':"")+">"+t[1]+(c?'<span class="count">'+c+"</span>":"")+"</a>"}).join("");
+  $("#tabs").innerHTML=TABS.map(function(t){var c=t[0]==="approvals"?w:t[0]==="requests"?nr:0;return '<a href="#'+t[0]+'"'+(v===t[0]||(v==="project"&&t[0]==="board")?' aria-current="page"':"")+">"+t[1]+(c?'<span class="count">'+c+"</span>":"")+"</a>"}).join("");
   if(loaded&&P.length){
     var live=P.filter(function(p){return ["In progress","In review","Ongoing"].indexOf(p.status)>=0}).length, sh=P.filter(function(p){return p.status==="Shipped"}).length;
     var lu="";COLS.forEach(function(c){S[c].forEach(function(x){if(x.updatedAt&&x.updatedAt>lu)lu=x.updatedAt})});
@@ -175,6 +178,76 @@ function render(){
     else f='You are viewing a read-only copy. Send requests and approvals to the marketing manager. <button class="linkbtn" id="unlock">Unlock editing</button>';
   }
   $("#foot").innerHTML=f;
+}
+
+/* ---------- project page: docs, email threads, linked projects and everything logged against the project ---------- */
+var DOCKINDS=["Doc","File","Design","Email thread","Deck","Sheet","Other"];
+function docsOf(p){var f=Array.isArray(p.files)?p.files.slice():[];var u=safeUrl(p.link);if(u&&!f.some(function(x){return x.url===u}))f.push({title:"Link to the work",url:u,kind:"Doc",_legacy:true});return f}
+function sortedDocs(p){return docsOf(p).map(function(d,i){return Object.assign({_i:d._legacy?"":String(i)},d)}).sort(function(a,b){return (b.date||"").localeCompare(a.date||"")})}
+function relatedOf(p){var ids={};(p.related||[]).forEach(function(i){ids[i]=1});S.projects.forEach(function(q){if((q.related||[]).indexOf(p.id)>=0)ids[q.id]=1});delete ids[p.id];return S.projects.filter(function(q){return ids[q.id]})}
+function docRow(pr,d,latest,showEdit){
+  var u=safeUrl(d.url), meta=[d.kind,d.date?fmt(d.date):"",d.note].filter(Boolean).join(" · ");
+  return '<div class="row"><div class="main"><div class="t">'+(u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(d.title||u)+"</a>":esc(d.title))+(latest?' <span class="pill" style="--c:var(--ok)">Latest</span>':"")+"</div>"+(meta?'<div class="s">'+esc(meta)+"</div>":"")+'</div><div class="side">'+(showEdit&&canWrite&&db&&d._i!==""?'<button class="btn ghost sm" data-doc="'+esc(pr.id)+"|"+d._i+'">Edit</button>':"")+"</div></div>";
+}
+function projectPage(){
+  var p=S.projects.find(function(x){return x.id===pid()});
+  if(!p)return loaded?'<p class="empty">That project is not on the board any more. <a href="#board">Back to the board</a></p>':"";
+  var D=sortedDocs(p), docs=D.filter(function(d){return d.kind!=="Email thread"}), mail=D.filter(function(d){return d.kind==="Email thread"});
+  var rel=relatedOf(p);
+  var U=S.updates.filter(function(u){return u.project===p.id}).sort(by("date",-1));
+  var Dc=S.decisions.filter(function(d){return d.project===p.id}).sort(by("neededBy"));
+  var V=S.vendors.filter(function(v){return v.project===p.id});
+  var facts=[["Next step",p.next],["Notes",p.note],["Result",p.result],["Due",p.due&&p.status!=="Shipped"?fmt(p.due)+" · "+rel_(p.due):""],["Shipped",p.shippedAt?fmt(p.shippedAt):""],["Budget",(Number(p.budget)||Number(p.spend))?usd(p.spend)+" spent of "+usd(p.budget):""],["Company",p.company],["Last updated",p.updatedAt?fmt(p.updatedAt):""]].filter(function(f){return f[1]});
+  var w=canWrite&&db;
+  var h='<p><a class="back" href="#board">← Project board</a></p>';
+  h+='<div class="head"><div><h2>'+esc(p.name)+'</h2><p class="m">'+pill(p.status)+(p.area?' <span class="tag">'+esc(p.area)+"</span>":"")+(p.store&&p.store!=="All stores"?' <span class="tag">'+esc(p.store)+"</span>":"")+"</p></div>"+(w?'<div class="acts"><button class="btn ghost" data-edit="projects:'+esc(p.id)+'">Edit project</button><button class="btn ghost" data-relate="'+esc(p.id)+'">Link a project</button><button class="btn" data-doc="'+esc(p.id)+'|">Add a doc or link</button></div>':"")+"</div>";
+  h+='<div class="grid">';
+  h+='<section class="panel"><p class="q">Docs and files</p><h3>Latest work</h3>'+list(docs.map(function(d,i){return docRow(p,d,i===0&&docs.length>1,true)}),"No docs attached yet."+(w?" Add the latest version of anything this project uses: briefs, decks, designs, PDFs, Drive or Canva links.":""))+"</section>";
+  h+='<section class="panel"><p class="q">Linked projects</p><h3>Related work</h3>'+list(rel.map(function(q){var ld=sortedDocs(q).filter(function(d){return d.kind!=="Email thread"});var top=ld[0];return '<div class="row"><div class="main"><div class="t">'+plink(q)+'</div>'+(top?'<div class="s">Latest: '+(safeUrl(top.url)?'<a href="'+esc(safeUrl(top.url))+'" target="_blank" rel="noopener">'+esc(top.title||top.url)+"</a>":esc(top.title))+(top.date?" · "+esc(fmt(top.date)):"")+"</div>":'<div class="s">No docs attached yet</div>')+'</div><div class="side">'+pill(q.status)+(w&&(p.related||[]).indexOf(q.id)>=0?'<button class="btn ghost sm" data-unlink="'+esc(p.id)+"|"+esc(q.id)+'">Unlink</button>':w&&(q.related||[]).indexOf(p.id)>=0?'<button class="btn ghost sm" data-unlink="'+esc(q.id)+"|"+esc(p.id)+'">Unlink</button>':"")+"</div></div>"}),"No linked projects. Link one when this project depends on another's work, like a plan that follows the brand guidelines.")+"</section>";
+  h+='<section class="panel"><p class="q">Email</p><h3>Email threads</h3>'+list(mail.map(function(d){return docRow(p,d,false,true)}),"No email threads attached. Add a link to a thread (for example from Gmail) with the type set to Email thread.")+"</section>";
+  h+='<section class="panel"><p class="q">The project</p><h3>Details</h3>'+(facts.length?'<div class="list">'+facts.map(function(f){return '<div class="row"><div class="main"><div class="s">'+esc(f[0])+'</div><div class="t">'+esc(f[1])+"</div></div></div>"}).join("")+"</div>":'<p class="empty">No details yet.</p>')+"</section>";
+  h+="</div>";
+  h+='<section class="panel"><p class="q">History</p><h3>Status updates</h3>'+list(U.map(updRow),"No updates posted for this project yet.")+"</section>";
+  if(Dc.length)h+='<section class="panel"><p class="q">Decisions</p><h3>Approvals and decisions</h3>'+list(Dc.map(decRow),"")+"</section>";
+  if(V.length)h+='<section class="panel"><p class="q">Vendors</p><h3>Vendor threads</h3>'+list(V.map(venRow),"")+"</section>";
+  return h;
+}
+function rel_(iso){return rel(iso)}
+function openDoc(projId,idx){
+  var p=S.projects.find(function(x){return x.id===projId});if(!p)return;
+  var d=idx==null?{kind:"Doc",date:today()}:(p.files||[])[idx]||{};
+  cur={col:"__doc",pid:projId,idx:idx,armed:false};
+  $("#frm").innerHTML="<h2>"+(idx==null?"Add a doc or link":"Edit doc or link")+'</h2><p class="sub">'+esc(p.name)+'</p><div class="fields"><div class="fld wide"><label for="d-title">Title (required)</label><input id="d-title" value="'+esc(d.title||"")+'" placeholder="LaHaze Brand Guidelines v3"></div><div class="fld wide"><label for="d-url">Link (https://…) (required)</label><input id="d-url" value="'+esc(d.url||"")+'" placeholder="Google Drive, Canva, Gmail, Dropbox…"></div><div class="fld"><label for="d-kind">Type</label><select id="d-kind">'+DOCKINDS.map(function(k){return "<option"+(k===d.kind?" selected":"")+">"+k+"</option>"}).join("")+'</select></div><div class="fld"><label for="d-date">Version date</label><input id="d-date" type="date" value="'+esc(d.date||"")+'"></div><div class="fld wide"><label for="d-note">Note</label><input id="d-note" value="'+esc(d.note||"")+'" placeholder="Version, what changed, who sent it"></div></div><p class="sub">The newest dated doc shows as Latest. Anyone with the board link can see this list, but the files themselves keep their own sharing settings.</p><p class="err" id="f-err" hidden></p><div class="actions">'+(idx!=null?'<button type="button" class="btn danger" id="f-del">Remove</button>':"")+'<span class="sp"></span><button type="button" class="btn ghost" id="f-cancel">Cancel</button><button type="submit" class="btn" id="f-save">Save</button></div>';
+  $("#dlg").showModal();
+}
+function openRelate(projId){
+  var p=S.projects.find(function(x){return x.id===projId});if(!p)return;
+  var taken={};relatedOf(p).forEach(function(q){taken[q.id]=1});
+  var opts=S.projects.filter(function(q){return q.id!==p.id&&!taken[q.id]}).sort(by("name"));
+  cur={col:"__relate",pid:projId};
+  $("#frm").innerHTML='<h2>Link a project</h2><p class="sub">Linked projects show on each other\'s page, with their latest doc.</p><div class="fields"><div class="fld wide"><label for="r-p">Project</label><select id="r-p">'+opts.map(function(q){return '<option value="'+esc(q.id)+'">'+esc(q.name)+"</option>"}).join("")+'</select></div></div><p class="err" id="f-err" hidden></p><div class="actions"><span class="sp"></span><button type="button" class="btn ghost" id="f-cancel">Cancel</button><button type="submit" class="btn" id="f-save"'+(opts.length?"":" disabled")+'>Link</button></div>';
+  $("#dlg").showModal();
+}
+function saveSpecial(){
+  var p=S.projects.find(function(x){return x.id===cur.pid});if(!p)return;
+  var err=function(m){var el=$("#f-err");el.textContent=m;el.hidden=false};
+  if(cur.col==="__doc"){
+    var d={title:$("#d-title").value.trim(),url:$("#d-url").value.trim(),kind:$("#d-kind").value,date:$("#d-date").value,note:$("#d-note").value.trim()};
+    if(!d.title)return err("Title is required.");
+    if(!safeUrl(d.url))return err("The link must start with https://");
+    var fl=(p.files||[]).slice(); if(cur.idx==null)fl.push(d); else fl[cur.idx]=d;
+    $("#f-save").disabled=true;
+    db.collection("projects").doc(p.id).update({files:fl,updatedAt:today()}).then(function(){$("#dlg").close()},fail);
+  } else {
+    var id=$("#r-p").value; if(!id)return;
+    var r=(p.related||[]).filter(function(x){return x!==id}).concat([id]);
+    $("#f-save").disabled=true;
+    db.collection("projects").doc(p.id).update({related:r,updatedAt:today()}).then(function(){$("#dlg").close()},fail);
+  }
+}
+function unlink(fromId,toId){
+  var p=S.projects.find(function(x){return x.id===fromId});if(!p||!db)return;
+  db.collection("projects").doc(p.id).update({related:(p.related||[]).filter(function(x){return x!==toId}),updatedAt:today()}).catch(function(){problem="That link could not be removed. Try again.";render()});
 }
 
 /* ---------- data layer: talks to /api/data, or to this browser when storage is not connected ---------- */
@@ -256,6 +329,7 @@ $("#frm").addEventListener("submit",function(e){
     return;
   }
   if(!db)return;
+  if(cur.col==="__doc"||cur.col==="__relate"){saveSpecial();return}
   var sc=SCHEMA[cur.col], out=Object.assign({},cur.defaults), bad="";
   sc.fields.forEach(function(f){var el=document.getElementById("f-"+cur.col+"-"+f[0]);if(!el)return;var v=el.value.trim(); if(f[3]===1&&!v&&!bad)bad=f[1]; if(f[2]==="number"){if(v!=="")out[f[0]]=Number(v)}else out[f[0]]=v});
   if(bad){var el=$("#f-err");el.textContent=bad+" is required.";el.hidden=false;return}
@@ -270,6 +344,7 @@ $("#frm").addEventListener("submit",function(e){
 });
 $("#frm").addEventListener("click",function(e){
   if(e.target.id==="f-cancel")$("#dlg").close();
+  if(e.target.id==="f-del"&&cur&&db&&cur.col==="__doc"){if(!cur.armed){cur.armed=true;e.target.textContent="Click again to remove";return}var p0=S.projects.find(function(x){return x.id===cur.pid});var fl=(p0.files||[]).slice();fl.splice(cur.idx,1);db.collection("projects").doc(cur.pid).update({files:fl,updatedAt:today()}).then(function(){$("#dlg").close()},fail);return}
   if(e.target.id==="f-del"&&cur&&db){ if(!cur.armed){cur.armed=true;e.target.textContent="Click again to delete for everyone";return} db.collection(cur.col).doc(cur.id).delete().then(function(){$("#dlg").close()},fail)}
 });
 $("#dlg").addEventListener("close",function(){render()});
@@ -279,9 +354,12 @@ document.addEventListener("click",function(e){
   var t=e.target.closest("[data-edit],[data-add]");
   if(t){ if(t.dataset.add){e.preventDefault();openForm(t.dataset.add,null)} else {var a=t.dataset.edit.split(":");openForm(a[0],a.slice(1).join(":"))} return }
   var m=e.target.closest("[data-mode]"); if(m){filt.mode=m.dataset.mode;keep();render();return}
-  var c=e.target.closest("[data-card]"); if(c&&canWrite&&db)openForm("projects",c.dataset.card);
+  var c=e.target.closest("[data-card]"); if(c){location.hash="#p/"+encodeURIComponent(c.dataset.card);return}
+  var dd=e.target.closest("[data-doc]"); if(dd){var q=dd.dataset.doc.split("|");openDoc(q[0],q[1]===""?null:Number(q[1]));return}
+  var rl=e.target.closest("[data-relate]"); if(rl){openRelate(rl.dataset.relate);return}
+  var ul=e.target.closest("[data-unlink]"); if(ul){var u2=ul.dataset.unlink.split("|");unlink(u2[0],u2[1]);return}
 });
-document.addEventListener("keydown",function(e){var c=e.target.closest&&e.target.closest("[data-card]");if(c&&(e.key==="Enter"||e.key===" ")&&canWrite&&db){e.preventDefault();openForm("projects",c.dataset.card)}});
+document.addEventListener("keydown",function(e){var c=e.target.closest&&e.target.closest("[data-card]");if(c&&(e.key==="Enter"||e.key===" ")){e.preventDefault();location.hash="#p/"+encodeURIComponent(c.dataset.card)}});
 var dragId="";
 document.addEventListener("dragstart",function(e){var c=e.target.closest&&e.target.closest("[data-card]");if(!c)return;dragId=c.dataset.card;try{e.dataTransfer.setData("text/plain",dragId);e.dataTransfer.effectAllowed="move"}catch(x){}c.classList.add("drag")});
 document.addEventListener("dragend",function(e){dragId="";var c=e.target.closest&&e.target.closest("[data-card]");if(c)c.classList.remove("drag");document.querySelectorAll(".col.over").forEach(function(x){x.classList.remove("over")})});

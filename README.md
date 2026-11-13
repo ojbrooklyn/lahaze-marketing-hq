@@ -28,3 +28,10 @@ it has no tools and can't change anything. It runs on Claude (`claude-opus-5-5`,
 - Limits, because the page is public: 20 questions per visitor per hour (`CHAT_LIMIT_PER_HOUR`) and 500 per day
   across all visitors (`CHAT_LIMIT_PER_DAY`). Counters live in the same Redis database.
 - Optional: `CHAT_MODEL` to use a different Claude model.
+
+## Project pages
+
+Select any card to open its project page: docs and files (newest dated version marked Latest), email threads,
+linked projects with their latest doc, status updates, approvals and vendor threads for that project.
+With editing unlocked, "Add a doc or link" attaches any https link (Google Drive, Canva, Gmail, Dropbox...).
+The list is visible to anyone with the board link; the files themselves keep their own sharing settings.

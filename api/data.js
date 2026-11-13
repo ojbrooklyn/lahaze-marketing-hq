@@ -6,11 +6,22 @@ const EDIT_KEY = process.env.EDIT_KEY || "";
 const MAX_DOC = 20000;
 
 function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+const prim = (v) => v === null || ["string", "number", "boolean"].includes(typeof v);
+function cleanItem(v) {
+  if (prim(v)) return v;
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    const o = {};
+    for (const [k, x] of Object.entries(v)) if (!k.startsWith("_") && prim(x)) o[k] = x;
+    return o;
+  }
+  return undefined;
+}
 function clean(doc) {
   const o = {};
   if (doc && typeof doc === "object") for (const [k, v] of Object.entries(doc)) {
     if (k === "id" || k.startsWith("__")) continue;
-    if (v === null || ["string", "number", "boolean"].includes(typeof v)) o[k] = v;
+    if (prim(v)) o[k] = v;
+    else if (Array.isArray(v)) o[k] = v.slice(0, 100).map(cleanItem).filter((x) => x !== undefined);
   }
   return o;
 }

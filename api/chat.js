@@ -12,7 +12,7 @@ const INSTRUCTIONS = `You are the assistant on LaHaze Marketing HQ, the public t
 
 Answer questions about the projects, approvals and decisions, requests, status updates, vendor threads and key dates, using only the tracker data provided below. Keep answers short and plain: a sentence or two, or a short list when listing several items. Give dates as written words (for example "Nov 26"), and say how far away they are when that helps.
 
-If the tracker doesn't hold the answer, say so plainly and suggest asking the marketing manager or adding it on the board. Never invent projects, dates, budgets, people or results. A status of "Not set" means nobody has set one yet.
+If the tracker doesn't hold the answer, say so plainly and suggest asking the marketing manager or adding it on the board. Never invent projects, dates, budgets, people or results. A status of "Not set" means nobody has set one yet. Each project can list its docs (with a version date: the newest is the latest version) and linked projects; when someone asks about a project, mention its latest docs and linked projects, and include a doc's link when it helps.
 
 You can't change anything on the board. If someone asks you to move, add or edit something, tell them to do it on the board itself (editing may need the passcode).
 
@@ -40,7 +40,14 @@ function boardText(data) {
   const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o[k] !== undefined && o[k] !== "").map((k) => [k, o[k]]));
   const sec = (title, rows) => `## ${title} (${rows.length})\n` + (rows.length ? rows.map((r) => JSON.stringify(r)).join("\n") : "none");
   return [
-    sec("Projects", (data.projects || []).map((p) => pick(p, ["name", "company", "area", "store", "status", "due", "next", "note", "link", "result", "budget", "spend", "shippedAt", "updatedAt"]))),
+    sec("Projects", (data.projects || []).map((p) => {
+      const linked = new Set(p.related || []);
+      (data.projects || []).forEach((q) => { if ((q.related || []).includes(p.id)) linked.add(q.id); });
+      linked.delete(p.id);
+      const files = (Array.isArray(p.files) ? p.files : []).map((f) => pick(f, ["title", "kind", "date", "note", "url"]));
+      return { ...pick(p, ["name", "company", "area", "store", "status", "due", "next", "note", "link", "result", "budget", "spend", "shippedAt", "updatedAt"]),
+        ...(files.length ? { docs: files } : {}), ...(linked.size ? { linkedProjects: [...linked].map((i) => byId[i]).filter(Boolean) } : {}) };
+    })),
     sec("Approvals and decisions", (data.decisions || []).map((d) => ({ ...pick(d, ["title", "type", "ask", "from", "neededBy", "status", "outcome", "decidedOn"]), project: byId[d.project] }))),
     sec("Requests", (data.requests || []).map((r) => pick(r, ["title", "from", "store", "detail", "priority", "neededBy", "status", "reply"]))),
     sec("Status updates", (data.updates || []).map((u) => ({ ...pick(u, ["date", "kind", "text"]), project: byId[u.project] || "General" }))),
