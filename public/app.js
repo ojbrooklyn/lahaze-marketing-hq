@@ -3,8 +3,8 @@
 var STORES=["All stores","LaHaze (Cheboygan)","Lighthouse (Traverse City)","Parc (Alpena)","Newity"];
 var COMPANIES=["LaHaze","Newity"];
 var AREAS=["Campaigns","Brand","Web & digital","Retail","Content","Merch","Planning"];
-var CATS=["Direct marketing","Digital marketing","Operations","Membership","Subscriptions","Collaboration","Refresh website & GBP"];
-var CATHINT={"Direct marketing":"Billboards, radio, text marketing, paid ads","Digital marketing":"Content, social, SEO, GEO","Operations":"Dutchie, AlpineIQ, software"};
+var CATS=["Direct marketing","Digital marketing","Operations","Brand & retail","Membership","Subscriptions","Collaboration","Refresh website & GBP"];
+var CATHINT={"Direct marketing":"Billboards, radio, text marketing, paid ads","Digital marketing":"Content, social, SEO, GEO","Operations":"Dutchie, AlpineIQ, software, packaging, merch","Brand & retail":"Brand guidelines, store design"};
 var PRIOS=["High","Medium","Low"], PRANK={"High":0,"Medium":1,"Low":2}, PTONE={"High":"bad","Medium":"warn","Low":"mute"};
 function prioTag(p){return p.priority&&PRANK[p.priority]!=null?'<span class="pill prio" style="--c:var(--'+PTONE[p.priority]+')">'+esc(p.priority)+" priority</span>":""}
 function byPrio(a,b){var x=PRANK[a.priority],y=PRANK[b.priority];x=x==null?3:x;y=y==null?3:y;return x-y||(a.order||999)-(b.order||999)}

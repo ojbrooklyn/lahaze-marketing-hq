@@ -38,7 +38,7 @@ The list is visible to anyone with the board link; the files themselves keep the
 
 ## Categories and priority
 
-Each project has a category (Direct marketing, Digital marketing, Operations, Membership, Subscriptions,
+Each project has a category (Direct marketing, Digital marketing, Operations, Brand & retail, Membership, Subscriptions,
 Collaboration, Refresh website & GBP) and an optional priority (High, Medium, Low). The board filters by both, the
 list view groups by category, and the Briefing shows the top open priorities. Drag cards up and down within a column
 to set their order.
